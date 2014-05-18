@@ -1,5 +1,5 @@
 module WAV (
-        Wave,
+        Wave(..),
         readWave,
         writeWave
     ) where
@@ -7,19 +7,24 @@ module WAV (
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as L8
 import qualified Data.List as DL (intercalate)
-import Data.Word
 
 data Wave = Wave {
+    chunk1Size :: Int,
+    compression :: Compression,
     numberOfChannels :: Int,
     sampleRate :: Int,
     byteRate :: Int,
     blockAlign :: Int,
     bitsPerSample :: Int,
+    chunk2Size :: Int,
     waveData :: L.ByteString
 } deriving (Eq)
 
+data Compression = PCM
+                   deriving (Eq, Show)
+
 instance Show Wave where
-    show (Wave nc sr br ba bps _) = "Wave " ++ DL.intercalate " " (map show [nc, sr, br, ba, bps])
+    show (Wave _ af nc sr br ba bps c2s _) = "Wave " ++ show af ++ " " ++ DL.intercalate " " (map show [nc, sr, br, ba, bps, c2s])
 
 readWave :: FilePath -> IO Wave
 
@@ -35,6 +40,18 @@ writeWave :: FilePath -> Wave -> IO()
 writeWave filepath wave = do
     let s = unParseWave wave
     L.writeFile filepath s
+
+formatToCompression :: Int -> Compression
+
+formatToCompression n =
+    case n of
+        1 -> PCM
+
+compressionToFormat :: Compression -> Int
+
+compressionToFormat c =
+    case c of
+        PCM -> 1
 
 matchMagic :: String -> L.ByteString -> Maybe L.ByteString
 
@@ -60,23 +77,22 @@ parseWave s =
     \(chunkSize, x) -> matchMagic "WAVE" x  >>=
     matchMagic "fmt "                       >>=
     extractDrop 4                           >>=
-    \(subChunk1Size, x) -> extractDrop 2 x  >>=
-    \(audioFormat, x) -> extractDrop 2 x    >>=
+    \(c1s, x) -> extractDrop 2 x            >>=
+    \(af, x) -> extractDrop 2 x             >>=
     \(nc, x) -> extractDrop 4 x             >>=
     \(sr, x) -> extractDrop 4 x             >>=
     \(br, x) -> extractDrop 2 x             >>=
     \(ba, x) -> extractDrop 2 x             >>=
     \(bps, x) -> matchMagic "data" x        >>=
     extractDrop 4                           >>=
-    \(subChunk2Size, wd) -> Just (Wave nc sr br ba bps wd)
+    \(c2s, wd) -> Just (Wave c1s (formatToCompression af) nc sr br ba bps c2s wd)
 
 unParseWave :: Wave -> L.ByteString
 
-unParseWave (Wave nc sr br ba bps wd) =
-    L.concat ([L8.pack "RIFF", intToBS (36 + lwd, 4), L8.pack "WAVE", L8.pack "fmt "] ++
-              map intToBS [(16, 4), (1, 2), (nc, 2), (sr, 4), (br, 4), (ba, 2), (bps, 2)] ++
-              [L8.pack "data", intToBS (lwd, 4), wd])
-    where lwd = fromIntegral (L.length wd)
+unParseWave (Wave c1s af nc sr br ba bps c2s wd) =
+    L.concat ([L8.pack "RIFF", intToBS (20 + c1s + c2s, 4), L8.pack "WAVE", L8.pack "fmt "] ++
+              map intToBS [(c1s, 4), (compressionToFormat af, 2), (nc, 2), (sr, 4), (br, 4), (ba, 2), (bps, 2)] ++
+              [L8.pack "data", intToBS (c2s, 4), wd])
 
 intToBS :: (Int, Int) -> L.ByteString
 
