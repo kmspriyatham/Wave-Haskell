@@ -38,8 +38,12 @@ readWave filepath = do
 writeWave :: FilePath -> Wave -> IO()
 
 writeWave filepath wave = do
-    let s = unParseWave wave
-    L.writeFile filepath s
+    L.writeFile filepath (unParseWave wave)
+
+checkWave :: Wave -> Bool
+
+checkWave (Wave c1s af nc sr br ba bps c2s wd) =
+    (c2s == fromIntegral (L.length wd) && (br == div (sr*nc*bps) 8) && (ba == div (nc*bps) 8))
 
 formatToCompression :: Int -> Compression
 
@@ -72,29 +76,29 @@ listOfHexToDec xs = sum $ zipWith (*) (map (256^) [0..]) xs
 parseWave :: L.ByteString -> Maybe Wave
 
 parseWave s =
-    matchMagic "RIFF" s                     >>=
-    extractDrop 4                           >>=
-    \(chunkSize, x) -> matchMagic "WAVE" x  >>=
-    matchMagic "fmt "                       >>=
-    extractDrop 4                           >>=
-    \(c1s, x) -> extractDrop 2 x            >>=
-    \(af, x) -> extractDrop 2 x             >>=
-    \(nc, x) -> extractDrop 4 x             >>=
-    \(sr, x) -> extractDrop 4 x             >>=
-    \(br, x) -> extractDrop 2 x             >>=
-    \(ba, x) -> extractDrop 2 x             >>=
-    \(bps, x) -> matchMagic "data" x        >>=
-    extractDrop 4                           >>=
-    \(c2s, wd) -> Just (Wave c1s (formatToCompression af) nc sr br ba bps c2s wd)
+    matchMagic "RIFF" s                      >>=
+    extractDrop 4                            >>=
+    \ (chunkSize, x) -> matchMagic "WAVE" x  >>=
+    matchMagic "fmt "                        >>=
+    extractDrop 4                            >>=
+    \ (c1s, x) -> extractDrop 2 x            >>=
+    \ (af, x) -> extractDrop 2 x             >>=
+    \ (nc, x) -> extractDrop 4 x             >>=
+    \ (sr, x) -> extractDrop 4 x             >>=
+    \ (br, x) -> extractDrop 2 x             >>=
+    \ (ba, x) -> extractDrop 2 x             >>=
+    \ (bps, x) -> matchMagic "data" x        >>=
+    extractDrop 4                            >>=
+    \ (c2s, wd) -> Just (Wave c1s (formatToCompression af) nc sr br ba bps c2s wd)
 
 unParseWave :: Wave -> L.ByteString
 
 unParseWave (Wave c1s af nc sr br ba bps c2s wd) =
-    L.concat ([L8.pack "RIFF", intToBS (20 + c1s + c2s, 4), L8.pack "WAVE", L8.pack "fmt "] ++
-              map intToBS [(c1s, 4), (compressionToFormat af, 2), (nc, 2), (sr, 4), (br, 4), (ba, 2), (bps, 2)] ++
-              [L8.pack "data", intToBS (c2s, 4), wd])
+    L.concat ([L8.pack "RIFF", intToBS (20 + c1s + c2s) 4, L8.pack "WAVE", L8.pack "fmt "] ++
+              map (uncurry intToBS) [(c1s, 4), (compressionToFormat af, 2), (nc, 2), (sr, 4), (br, 4), (ba, 2), (bps, 2)] ++
+              [L8.pack "data", intToBS c2s 4, wd])
 
-intToBS :: (Int, Int) -> L.ByteString
+intToBS :: Int -> Int -> L.ByteString
 
-intToBS (n, count) = L.pack (a ++ (take (count - (length a))(repeat 0x0)))
-                     where a = map fromIntegral ((\(q, r) -> [r, q]) $ quotRem n 256)
+intToBS n count = L.pack (a ++ (take (count - (length a))(repeat 0)))
+                     where a = map fromIntegral ((\ (q, r) -> [r, q]) $ quotRem n 256)
