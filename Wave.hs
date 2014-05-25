@@ -30,14 +30,17 @@ instance Show Wave where
 readWave :: FilePath -> IO Wave
 readWave filepath = do
     content <- L.readFile filepath
-    let w = runParse waveParser (ParseState content 0)
-    case w of
-        Right (w, l) -> return w
+    let wave = runParse waveParser (ParseState content)
+    case wave of
+        Right (w, _) -> return w
         Left err -> error err
 
 writeWave :: FilePath -> Wave -> IO()
 writeWave filepath wave = do
-    L.writeFile filepath (unParseWave wave)
+    let content = unParseWave wave
+    case content of
+        Right (_, c) -> L.writeFile filepath (byteString c)
+        Left err -> error err
 
 checkWave :: Wave -> Bool
 checkWave (Wave c1s af nc sr br ba bps c2s wd) =
@@ -53,11 +56,23 @@ compressionToFormat c =
     case c of
         PCM -> 1
 
-unParseWave :: Wave -> L.ByteString
-unParseWave (Wave c1s af nc sr br ba bps c2s wd) =
-    L.concat ([L8.pack "RIFF", intToBS (20 + c1s + c2s) 4, L8.pack "WAVE", L8.pack "fmt "] ++
-              map (uncurry intToBS) [(c1s, 4), (compressionToFormat af, 2), (nc, 2), (sr, 4), (br, 4), (ba, 2), (bps, 2)] ++
-              [L8.pack "data", intToBS c2s 4, wd])
+unParseWave :: Wave -> Either String ((), ParseState)
+unParseWave wave = runParse unParse' (ParseState L.empty)
+    where unParse' = do
+            setMagic "RIFF"
+            setNumber (20 + chunk1Size wave + chunk2Size wave) 4
+            setMagic "WAVE"
+            setMagic "fmt "
+            setNumber (chunk1Size wave) 4
+            setNumber (compressionToFormat $ compression wave) 2
+            setNumber (numberOfChannels wave) 2
+            setNumber (sampleRate wave) 4
+            setNumber (byteRate wave) 4
+            setNumber (blockAlign wave) 2
+            setNumber (bitsPerSample wave) 2
+            setMagic "data"
+            setNumber (chunk2Size wave) 4
+            setBytes (waveData wave)
 
 waveParser :: Parse Wave
 waveParser = do
